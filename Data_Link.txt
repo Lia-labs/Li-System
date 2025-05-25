@@ -1,0 +1,11 @@
+
+
+    BASIC KEYS:
+        *Owners  -> []  //List of Owners
+        *Trusted    -> []   //List of Tresteds
+        *Blacklist  -> []   //Blacklist
+        
+
+
+    PREFIX:
+        *_ur:   .....   [_ur:+id] : "PATH"
