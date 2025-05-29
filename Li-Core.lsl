@@ -1,13 +1,19 @@
 //Definitions
 
+float onlineTimeLockStarted  = 0.0;
+float TimeLockDuration = 10.0;
 integer DIALOG_CHANNEL = -123479;
 integer TEXTBOX_CHANNEL = -67981367;
 integer listenerHandle;
 integer listenerHandle_TextBox;
 integer Cycles_menu = 1;
-
+integer Timer_in_seconds =0;
 string ActualMenu = "Main";
 
+
+integer onlineTimeLockEnabledTimer = FALSE;
+integer realTimeLockEnabledTimer = FALSE;
+string Timer_Mode = "Online";
 
 integer Key_Status = TRUE;
 string Lock_Message = "Not locked";
@@ -22,10 +28,11 @@ string status_detach= "y";
 integer Public_Mode = TRUE;
 integer HIDEEN_TIMER = FALSE;
 
+// Reset tracker
+integer BOOT_TIME;
+
 //Requests
 list Sensor_Requests = [];
-
-
 
 
 //Buttons Lists Definitions
@@ -33,13 +40,15 @@ list MM1 = ["-","↩ Close","-","-","Access","Settings","Lock 🔒","Take Key �
 list MM_TakenKey_1 = ["-","↩ Close","-","-","Access","Settings","Lock 🔒","[Key Taken]","Timer ⏰","-","Blindfold","-"];
 list M_Key_Summoning = ["Summon Key","🔺 Close" ];
 
-list M_Timer_1= ["-","🔺 Close","-","Online Time", "Hide Timer", "Real Time"];
+list M_Timer_1= ["-","🔺 Close","-","Start Timer", "-","-","RealTime ✖", "Hide Timer", "Set Timer"];
 list M_Acess_1 = ["-","🔺 Close","-","Blacklist ✖","Trusted ✖","Owners ✖","➕ Blacklist", "➕ Trusted","➕ Owners"];
 list select_buttons =["🔁 Re-Scan","↩ Close","Manual Input","4","5","6","1","2","3"];
 list substract_buttons =["Manual Input","↩ Close",">>>","4","5","6","1","2","3"];
 list M_Settings =["-","🔺 Close","-"];
 
 
+
+//Functions
 string buttonLabel(string label) { //crop to valid UTF-8 of at most 24 bytes
     string  encoded = llStringToBase64(label);
     if (llStringLength(encoded) <= 32) {
@@ -56,6 +65,66 @@ string buttonLabel(string label) { //crop to valid UTF-8 of at most 24 bytes
         tail = tail >> 8; }
     return llBase64ToString(llGetSubString(encoded, 0, end)); }
 
+
+string sec_to_time( integer seconds){
+
+    integer days; 
+    integer hours;
+    integer min;
+    integer rest;
+
+    days = seconds / 86400 ;
+    rest = seconds % 86400 ;
+    hours = rest / 3600;
+    rest = rest % 3600;
+    min = rest / 60;
+    rest = rest %60;
+
+    return (string)days +"days "+ (string)hours + "h "+(string)min +"m "+ (string)rest+ "s";
+
+
+}
+
+/*
+integer string_to_sec(string text){
+
+    list split = llParseString2List(text, [" "], []);
+    integer sec_total = 0;
+    integer a;
+    
+    for  (a=0 ; a < llGetListLength(split); a++){
+
+        string value = llList2String (split, a );
+        string number = llGetSubString(value, 0, -2);
+        string letter = llGetSubString(value, -1, -1);
+
+        if (letter == "d"){ sec_total += (integer)number *24*60*60;}
+        else if (letter == "h"){ sec_total += (integer)number *60*60;}
+        else if (letter == "m"){ sec_total += (integer)number *60;}
+        else if (letter == "s"){ sec_total += (integer)number;}
+           
+    }
+
+    return sec_total;
+
+}
+*/
+
+
+
+unlock_timer(){
+    status_detach = "y";
+    Lock_Message = "Not locked";
+    MM1 = llListReplaceList(MM1, ["Lock 🔒"], 6, 6);
+    M_Timer_1= llListReplaceList(M_Timer_1, ["Start Timer"], 3, 3);
+}
+
+/*
+startTimelock(){
+    onlineTimeLockStarted = llGetTime();
+    llSetTimerEvent(1.0);
+}
+    */
 
 showMenu(string menuName, key id)
 {
@@ -108,8 +177,10 @@ showMenu(string menuName, key id)
     
     else if (menuName == "NoAccess")
         {buttons = ["Close"];}
+
     else if (menuName == "Settings")
         {buttons = M_Settings;}
+
     else {buttons = [];}
 
     string message;
@@ -138,6 +209,12 @@ showMenu(string menuName, key id)
             message += "Settings Menu";
         }
 
+    else if (menuName == "Timer")
+        {
+            message = "\n PATH: " + PATH + "\n"+ "\n";
+            message += "Timer Menu" + "\n"+"Timer : " + sec_to_time(Timer_in_seconds);
+        }
+
     else if (menuName == "Key_Summoning")
         {message= "As a owner u can summon the key back to the set. Choose between calling it back or go back to the previous menu";}
 
@@ -162,6 +239,7 @@ default
         llOwnerSay("Core available:"+(string)llGetFreeMemory( )+"b");
         key owner_id = llGetOwner();
         listenerHandle = llListen(DIALOG_CHANNEL, "", "", "");
+        listenerHandle_TextBox= llListen(TEXTBOX_CHANNEL, "", "", "");
 
         llLinksetDataDelete("Trusted");
         llLinksetDataDelete("Blacklist");       
@@ -299,21 +377,47 @@ default
 
         // TEXTBOX_CHANNEL TRIGGER
         else if (channel == TEXTBOX_CHANNEL){
-            /*
-            if ( PATH =="MAIN_MENU/ ACCESS/ ADDING/" || PATH =="MAIN_MENU/ ACCESS/ REMOVING/" ){
-                if (  PATH =="MAIN_MENU/ ACCESS/ ADDING/"){
-                */
             
-                //llLinksetDataRead("Owners")
-            if ( llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ ADDING/") != -1 || llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ REMOVING/") != -1 ){
-                if ( llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ ADDING/") != -1){
+            if ( llLinksetDataRead("_ur:"+(string)id) == "MAIN_MENU/ TIMER/"){
+
+
+                list split = llParseString2List(message, [" "], []);
+                integer sec_total = 0;
+                integer a;
+                
+                for  (a=0 ; a < llGetListLength(split); a++){
+
+                    string value = llList2String (split, a );
+                    string number = llGetSubString(value, 0, -2);
+                    string letter = llGetSubString(value, -1, -1);
+
+                    if (letter == "d"){ sec_total += (integer)number *24*60*60;}
+                    else if (letter == "h"){ sec_total += (integer)number *60*60;}
+                    else if (letter == "m"){ sec_total += (integer)number *60;}
+                    else if (letter == "s"){ sec_total += (integer)number;}
+                }
+
+                Timer_in_seconds = sec_total;
+                TimeLockDuration = sec_total;
+                Menu = "Timer";
+                M_Call= TRUE;
+                //llOwnerSay(sec_to_time(sec_total));
+
+            }
+
+
+
 
             
-                    target_key =   llGetSubString(ActualMenu, 2, -1);
+
+            else if ( llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ ADDING/") != -1 || llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ REMOVING/") != -1 ){
+                if ( llSubStringIndex(llLinksetDataRead("_ur:"+(string)id), "MAIN_MENU/ ACCESS/ ADDING/") != -1){
+
+                    target_key = llGetSubString( llLinksetDataRead("_ur:"+(string)id), 27,-2);
                     
                 }
                 else{
-                    target_key =  llGetSubString(ActualMenu, 0, -3);
+                    target_key = llGetSubString( llLinksetDataRead("_ur:"+(string)id), 29,-2);
                     
                 }
 
@@ -375,7 +479,6 @@ default
             M_Call= TRUE;
               
         }
-
         
         else if (message == "Settings" )
         {
@@ -399,6 +502,108 @@ default
                 
         }
 
+        else if (llLinksetDataRead("_ur:"+(string)id) == "MAIN_MENU/ TIMER/"){
+
+            if (message == "Set Timer"){
+                
+                TB_message = "\n"+"Path: " + llLinksetDataRead("_ur:"+(string)id) + "\n"+ "\n"; 
+                TB_message += "Please add the time in the next format :"+
+                            "\n"+"d- days/ h-hours/ m-minutes/ s- seconds"+
+                            "\n"+"As a example : 1h 15m 59s";
+                TB_Call = TRUE;
+            }
+
+            else if (message == "Start Timer"){
+
+                if (Timer_Mode == "Online"){
+                    
+                    onlineTimeLockStarted = llGetTime();
+                    //llSetTimerEvent(1.0);
+                    onlineTimeLockEnabledTimer = TRUE;
+                    
+
+                }
+                else{
+
+                    
+                    onlineTimeLockStarted = llGetUnixTime();
+                    realTimeLockEnabledTimer = TRUE;
+
+                }
+
+
+                llSetTimerEvent(1.0);
+                M_Timer_1= llListReplaceList(M_Timer_1, ["Stop Timer"], 3, 3);
+
+                Menu = "Timer";
+                M_Call= TRUE;
+
+            }
+
+            else if (message == "RealTime ✖" || message == "RealTime ✔️") {
+
+                if (message == "RealTime ✖"){
+
+                    if (onlineTimeLockEnabledTimer){
+
+                        onlineTimeLockEnabledTimer = FALSE;
+                        llSetTimerEvent(0.0);
+
+                        float timeleft = TimeLockDuration - llGetTime();
+                        onlineTimeLockStarted = llGetUnixTime(); 
+                        TimeLockDuration = timeleft;
+                        llSetTimerEvent(1);
+
+                        realTimeLockEnabledTimer = TRUE;
+                        M_Timer_1= llListReplaceList(M_Timer_1, ["RealTime ✔️"], 6, 6);
+                        Timer_Mode = "RealTime";
+
+
+
+                    }
+                    else {
+                        M_Timer_1 = llListReplaceList(M_Timer_1, ["RealTime ✔️"], 6, 6);
+                        Timer_Mode = "RealTime";
+                    }
+     
+                }
+                else{
+                    
+                    if (realTimeLockEnabledTimer){
+
+                        realTimeLockEnabledTimer = FALSE;
+                        llSetTimerEvent(0.0);
+
+                        float timeleft = TimeLockDuration - llGetUnixTime();
+
+                        
+                        onlineTimeLockStarted = llGetTime(); 
+                        TimeLockDuration = timeleft;
+                        llSetTimerEvent(1);
+
+                        onlineTimeLockEnabledTimer = TRUE;
+                        M_Timer_1 = llListReplaceList(M_Timer_1, ["RealTime ✖"], 6, 6);
+                        Timer_Mode = "Online";
+
+                        
+                    }
+                    else {
+                        M_Timer_1= llListReplaceList(M_Timer_1, ["RealTime ✖"], 6, 6);
+                        Timer_Mode = "Online";
+
+                    }
+                    
+                }
+
+                
+                Menu = "Timer";
+                M_Call= TRUE;
+                llOwnerSay(Timer_Mode);
+            }
+
+
+
+        }
 
         else if (llLinksetDataRead("_ur:"+(string)id) == "MAIN_MENU/ ACCESS/")
         {
@@ -469,7 +674,6 @@ default
                 else if ( message == "↩ Close" ){
 
                     ActualMenu= "Access" ;
-                    
                     Menu = ActualMenu;
                     M_Call= TRUE;
 
@@ -477,7 +681,6 @@ default
                 }
                 else if ( message == "Manual Input" ){
 
-                    listenerHandle_TextBox= llListen(TEXTBOX_CHANNEL, "", id, "");
                     TB_message = "Please writte the key of the avatar u want to introduce: ";
                     TB_Call = TRUE;
                     
@@ -518,7 +721,6 @@ default
                             Del_Target =llList2Key(detected_keys,  (a-1 + ((integer)Cycles_menu-1)*6));
                             Del_Call = TRUE;
                             
-                            
                             Menu = "Access";
                             M_Call= TRUE;
 
@@ -541,7 +743,6 @@ default
                 }
                 else if ( message == "Manual Input" ){
 
-                    listenerHandle_TextBox= llListen(TEXTBOX_CHANNEL, "", id, "");
                     TB_message = "Please writte the key of the avatar u want to remove: ";
                     TB_Call = TRUE;
                     
@@ -567,9 +768,10 @@ default
                     }
                     D_Call = TRUE;
                     
-                }
-            }
+                }   
+        }
         
+
         else if (message == "-")
         {   
             
@@ -585,15 +787,18 @@ default
 
 
         
-        
+        // Textbox Dialogue Call
         if (TB_Call){llTextBox( id,TB_message,TEXTBOX_CHANNEL);}
+        // Sensor Call
         if (S_Call){
             //Sensor_Requests += [id];
             llSensor("", NULL_KEY, AGENT_BY_LEGACY_NAME, 20.0, PI);
         }
+
+        // Handles the dialogue to delete keys from the data_links
         if (D_Call){
             
-            string targetmenu = llGetSubString(ActualMenu, 0, -3);
+            string targetmenu = llGetSubString( llLinksetDataRead("_ur:"+(string)id), 29,-2);;
             
             list detected = llCSV2List(llLinksetDataRead(targetmenu));
             integer Lenght = llGetListLength(detected);
@@ -622,8 +827,7 @@ default
 
             list Data;
             string check_list = (llLinksetDataRead(target_key));  
-
-            
+           
             if (check_list ==""){
                 Data = [];
             }else {
@@ -633,7 +837,6 @@ default
             if (Add_Call){index = llListFindList(Data, [(string)Add_Target]);}
             if (Del_Call){index = llListFindList(Data, [(string)Del_Target]);}
             
-
              if (index != -1) {
                 if (Add_Call){errorMessage = "The avatar is already on the list";}
                 if (Del_Call){Data = llDeleteSubList(Data, index, index);}
@@ -647,29 +850,23 @@ default
             llLinksetDataWrite(target_key, llList2CSV(Data));  
         }
 
-        
-
         llRegionSayTo( id , 0 , errorMessage);
         if (M_Call){showMenu(Menu,id);}  
     }
 
     sensor(integer num_detected)
     {
-        //llOwnerSay("We get here");
         integer requests_lenght;
         integer Lenght_Requests = llGetListLength(Sensor_Requests);
-        //llOwnerSay((string)Lenght_Requests + " that long");
         
         for (requests_lenght=0 ; requests_lenght < Lenght_Requests; requests_lenght +=2 ){
             
             string name =  llList2String(Sensor_Requests, requests_lenght +1);
             if (name== ""){
 
-                //llOwnerSay("We get here, go go!");
                 list S_buttons = ["🔁 Re-Scan","↩ Close","Manual Input"];
                 integer Lenght = 6;
                 integer a = 0;
-                //integer b = 3;
                 string text = "Select the avatar you want to add"+"\n-----------------------";
 
                 for (a = 0; a < (Lenght); ++a)
@@ -677,7 +874,6 @@ default
                     if (llDetectedKey(a) != NULL_KEY){
                         text += "\n "+(string)(a+1) + ")  " + "secondlife:///app/agent/" + (string)llDetectedKey(a) + "/about";
                         S_buttons += llGetSubString(buttonLabel(llDetectedName(a)), 0, -9);
-                        //b += 1;
                     }
                     else{
                         S_buttons +=  "-";
@@ -696,10 +892,7 @@ default
                 {
                     if (llGetSubString(buttonLabel(llDetectedName(a)), 0, -9) == name){
 
-                        
-                        //llOwnerSay("GOT U!");
-                        //llOwnerSay(llList2String(Adding_Request,requests_lenght));
-                        
+
                         string target_user = "_ur:" + llList2String(Sensor_Requests,requests_lenght);
                         //llOwnerSay((string)target_user);
 
@@ -752,5 +945,26 @@ default
         }
     }
 
+    timer(){
+        if (onlineTimeLockEnabledTimer){
+            if (llGetTime() - onlineTimeLockStarted > TimeLockDuration){
+                llOwnerSay("Unlocked");
+                onlineTimeLockEnabledTimer = FALSE;
+                llSetTimerEvent(0.0);
+                unlock_timer();
+                
+
+            }
+        }
+
+        if (realTimeLockEnabledTimer){
+            if ( llGetUnixTime() - onlineTimeLockStarted > TimeLockDuration ){
+                llOwnerSay("Unlocked");
+                realTimeLockEnabledTimer = FALSE;
+                llSetTimerEvent(0.0);
+                unlock_timer();
+            }
+        }
+    }
 
 }
